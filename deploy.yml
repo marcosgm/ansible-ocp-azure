@@ -3,52 +3,78 @@
   roles:
     - { role: azure_infra, tags: infra }
 
+# The Azure VMs are provisioned asynchronously. It can take some time
+# until they are reachable via SSH, even after Azure reports that the
+# provisioning state is "Succeeded".
+- hosts: nodes
+  gather_facts: no
+  tasks:
+    - name: Wait for nodes to become reachable via SSH
+      wait_for_connection:
+        sleep: 30
+        timeout: 1200
+        connect_timeout: 10
+
 - hosts: nodes
   roles:
-    - { role: ocp_pre, tags: ocp }
+    - { role: ocp_pre, tags: ocp-pre }
 
 - name: call openshift prerequisites play
   import_playbook: /usr/share/ansible/openshift-ansible/playbooks/prerequisites.yml
-  vars:
-    container_runtime_docker_storage_type: overlay2
-    container_runtime_docker_storage_setup_device: /dev/sdd
-  tags: ocp
+  tags:
+    - ocp-pre
+    - ocp-deploy
 
 - name: call openshift deploy_cluster play
   import_playbook: /usr/share/ansible/openshift-ansible/playbooks/deploy_cluster.yml
-  tags: ocp
-
-# HACK: fails to connect to grafana svc the first time so run it twice
+  tags: ocp-deploy
+  
 - name: install Grafana
   import_playbook: /usr/share/ansible/openshift-ansible/playbooks/openshift-grafana/config.yml
-  tags: ocp
+  tags: 
+    - logging-metrics
+    - ocp-deploy
 
-- name: install Grafana
-  import_playbook: /usr/share/ansible/openshift-ansible/playbooks/openshift-grafana/config.yml
-  tags: ocp
-
+- hosts: nodes
+  roles:
+    - { role: ocp_post, tags: ocp-post }
 
 - hosts: localhost
   tasks:
-    - name: Install oc client
-      yum:
-        name: atomic-openshift-clients
-        state: latest
-      notify:
-        - add cluster-admin
-      tags: ocp
- 
-    - name: copy kube config
+    - name: Copy kube config to installation host
       fetch:
-        src: ~/.kube/config
-        dest: "~/.kube/"
+        src: /home/{{ admin_user }}/.kube/config
+        dest: ~/.kube/
         flat: yes
       delegate_to: "{{ groups.masters[0] }}"
-      notify:
-        - add cluster-admin
-      tags: ocp
- 
-  handlers:
+      tags: ocp-post
+
+    # The bastion is not part of the Ansible inventory file.
+    - name: Add bastion host
+      add_host:
+        name: bastion
+        groups: bastions
+        ansible_user: "{{ admin_user }}"
+        ansible_become: True
+      tags: ocp-post
+
+    - name: Copy kube config to bastion host
+      copy:
+        src: ~/.kube/config
+        dest: /home/{{ admin_user }}/.kube/
+      delegate_to: bastion
+      tags: ocp-post
+
+- name: Configure internal master LB
+  import_playbook: activate-internal-lb.yml
+  when: master_lb_private_ip is defined
+
+- hosts: localhost
+  vars:
+    admin: "{{ openshift_master_htpasswd_users.keys() | to_nice_yaml }}"
+  tasks:
+    # This only works after the activate-internal-lb.yml playbook has
+    # been run, if an internal Azure load balancer is being used.
     - name: add cluster-admin
-      shell: oc adm policy add-cluster-role-to-user cluster-admin "{{ admin_user }}"
- 
+      shell: oc adm policy add-cluster-role-to-user cluster-admin {{ admin }}
+      tags: ocp-post

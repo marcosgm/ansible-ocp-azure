@@ -1,7 +1,7 @@
 
 
 # OpenShift on Azure
-This project automates the installation of OpenShift on Azure using ansible.  It follows the [OpenShift + Azure Reference Architecture](https://access.redhat.com/documentation/en-us/reference_architectures/2018/html-single/deploying_and_managing_openshift_3.9_on_azure/) closely. By default the following is deployed, 3 masters, 3 Infra nodes, 3 app nodes, 3 cns nodes, Logging (EFK), Metrics, Prometheus & Grafana. SSH access is restricted into the cluster by allowing only the bastion to reach each Node,  ssh is then proxied from the ansible control host via the bastion accesing nodes by hostname.  `ssh ocp-master-1`    To quickly standup an ansible deploy host have a look at [vagrant-rhel](https://github.com/hornjason/vagrant-rhel),  as of now it only supports virtualbox provider more to come soon.
+This project automates the installation of OpenShift on Azure using ansible.  It follows the [OpenShift + Azure Reference Architecture](https://access.redhat.com/documentation/en-us/reference_architectures/2018/html-single/deploying_and_managing_openshift_3.9_on_azure/) closely. By default the following is deployed, 3 masters, 3 Infra nodes, 3 app nodes, 3 cns nodes, Logging (EFK), Metrics, Prometheus & Grafana. SSH access is restricted into the cluster by allowing only the bastion to reach each Node,  ssh is then proxied from the ansible control host via the bastion accesing nodes by hostname.  `ssh ocp-master-1`    To quickly standup an ansible deploy host have a look at [vagrant-rhel](https://github.com/hornjason/vagrant-rhel),  as of now it only supports [virtualbox and libvirt providers](https://app.vagrantup.com/jasonhorn/boxes/rhel7).
 
 
 ## Topology
@@ -17,8 +17,21 @@ Master Nodes | ocp-master-# | 3 | Standard_D4s_v3 | 4 | 16
 Infra Nodes | ocp-infra-# | 3 | Standard_D4s_v3 | 4 | 16   
 App Nodes | ocp-app-# | 3 | Standard_D2S_v3 | 2 | 8  
 CNS Nodes | ocp-cns-# | 3 | Standard_D8s_v3 | 8 | 32 
-Bastion | | 1 | Standard_D1 | 1 | 3.5
+Bastion | bastion | 1 | Standard_D1 | 1 | 3.5
 Total | | 13 | | 55 | 219.5Gb 
+
+
+VM sizes can be configured from defaults by changing the following variables, if the sizes chosen are below minimum OpenShift requirements deployment checks will fail.
+
+
+| Variable | VM Size
+| -- | ---- |
+| vm_size_master: | Standard_D4s_v3
+| vm_size_infra: | Standard_D4s_v3
+| vm_size_node:  | Standard_D2s_v3
+| vm_size_cns:   |   Standard_D8s_v3
+| vm_size_bastion: | Standard_D1
+
 
 >After installing and setting up Azure CLI the following command can be used to show available VM Resources in a location.
 ```
@@ -28,13 +41,14 @@ az vm list-usage --location westus --output table
 ## Pre-Reqs
 
 Reqs
-A few Pre-Reqs need to be met and are documented in the Reference Architecture already.  **Ansible 2.5 is required**, the ansible control host running the deployment needs to be registered and subscribed to `rhel-7-server-ansible-2.5-rpms`.  Creating a [Service Principal](https://access.redhat.com/documentation/en-us/reference_architectures/2018/html-single/deploying_and_managing_openshift_3.9_on_azure/#service_principal) is documented as well as setting up the Azure CLI.  Currently the Azure CLI is setup on the ansible control host running the deployment using the playbook `azure_cli.yml` or by following instructions here, [Azure CLI Setup](https://access.redhat.com/documentation/en-us/reference_architectures/2018/html-single/deploying_and_managing_openshift_3.9_on_azure/#azure_cli_setup).
+A few Pre-Reqs need to be met and are documented in the Reference Architecture already.  **Ansible 2.5 is required**, the ansible control host running the deployment needs to be registered and subscribed to `rhel-7-server-ansible-2.5-rpms`.  Creating a [Service Principal](https://access.redhat.com/documentation/en-us/reference_architectures/2018/html-single/deploying_and_managing_openshift_3.9_on_azure/#service_principal) is documented as well as setting up the Azure CLI.  Currently the Azure CLI is setup on the ansible control host running the deployment using the playbook `azure_cli.yml` or by following instructions here, [Azure CLI Setup](https://docs.microsoft.com/en-us/cli/azure/create-an-azure-service-principal-azure-cli?toc=%2Fazure%2Fazure-resource-manager%2Ftoc.json&view=azure-cli-latest).
 
  1. Ansible control host setup:
     Register the ansible control host used for this deployment with valid RedHat subscription thats able to pull down ansible     2.5 or manually install ansible 2.5 along with atomic-openshift-utils.  To quickly create a VM using Vagrant try out [vagrant-rhel](https://github.com/hornjason/vagrant-rhel).
 ```
     sudo subscription-manager register --username < username > --password < password >
     sudo subscription-manager attach --pool < pool_id >
+    sudo subscription-manager repos --disable=*
     sudo subscription-manager repos \
     --enable="rhel-7-server-rpms" \
     --enable="rhel-7-server-extras-rpms" \
@@ -46,6 +60,7 @@ A few Pre-Reqs need to be met and are documented in the Reference Architecture a
 ```
 
  2. Clone this repository
+
  ```
  git clone https://github.com/hornjason/ansible-ocp-azure.git; cd ansible-ocp-azure
  ```
@@ -54,7 +69,10 @@ A few Pre-Reqs need to be met and are documented in the Reference Architecture a
  ansible-playbook azure-cli.yml
  ```
  4. Authenticate with Azure,  `az login`  described here, [Azure Authentication](https://docs.microsoft.com/en-us/cli/azure/authenticate-azure-cli?view=azure-cli-latest).
- 5. Create a Service Principal outlined here, [Creating SP](https://access.redhat.com/documentation/en-us/reference_architectures/2018/html-single/deploying_and_managing_openshift_3.9_on_azure/#service_principal).
+ 5. Create a Service Principal outlined here, [Creating SP](https://docs.microsoft.com/en-us/cli/azure/create-an-azure-service-principal-azure-cli?toc=%2Fazure%2Fazure-resource-manager%2Ftoc.json&view=azure-cli-latest). and [3.9 Reference Architecture](https://access.redhat.com/documentation/en-us/reference_architectures/2018/html-single/deploying_and_managing_openshift_3.9_on_azure/#service_principal)
+ ```
+ az ad sp create-for-rbac --name ServicePrincipalName --password PASSWORD
+ ```
  6. Copy vars.yml.example to vars.yml
   ```
   cp vars.yml.example vars.yml 
@@ -73,6 +91,7 @@ Most defaults are specified in `role/azure/defaults/main.yml`,  Sensitive inform
  - **admin_privkey**: - Path to the private ssh key associated with the public key above.  ex. `'~/.ssh/id_rsa`
  - **sp_name**: - Service Principal name created in step 5.
  - **sp_secret**: - Service Principal secret 
+ - **sp_app_id**: - Service Principal APPID
  - **rhsm_user**: - If subscribing to RHSM using username / password, fill in username
  - **rhsm_pass**: - If subscribing to RHSM using username / password, fill in passowrd for RHSM 
  - **rhsm_key**: -  If subscribing to RHSM using activation key and orgId fill in activation key here.
@@ -91,6 +110,7 @@ Optional Variables:
 By Default the HTPasswdPasswordIdentityProvider is used but can be customized,  this will be templated out to the ansible hosts file.  By default htpasswd user is added.
 - **openshift_master_htpasswd_users**: - Contains the user: < passwd hash generated from htpasswd -n user >
 - **deploy_cns**: true
+- **deploy_cns_to_infra**: true  - This will deploy CNS on Infra nodes and **NOT** create separate CNS nodes
 - **deploy_metrics**: true
 - **deploy_logging**: true
 - **deploy_prometheus**: true

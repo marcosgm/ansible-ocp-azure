@@ -37,10 +37,9 @@
   redhat_subscription:
     state: present
     username: "{{ rhsm_user }}"
-    pasword: "{{ rhsm_pass }}"
+    password: "{{ rhsm_pass }}"
     pool_ids: "{{ rhsm_broker_pool }}"
   register: task_result
-  serial: 5
   until: task_result is success
   retries: 10
   delay: 30
@@ -58,7 +57,6 @@
     org_id: "{{ rhsm_org }}"
     pool_ids: "{{ rhsm_broker_pool }}"
   register: task_result
-  serial: 5
   until: task_result is success
   retries: 10
   delay: 30
